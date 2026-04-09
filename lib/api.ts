@@ -2,7 +2,8 @@
 import { 
   PlayerSearchResponse, 
   SeasonStatsResponse, 
-  GameStatsResponse 
+  GameStatsResponse,
+  PlayerOverallStatsResponse,
 } from '../types/leijonat';
 
 const BASE_URL = 'https://www.leijonat.fi/modules';
@@ -63,6 +64,33 @@ export async function getGoalieGameStats(
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to fetch game stats');
+    return await res.json();
+  } catch (error) {
+    console.error(error);
+    return null;
+  }
+}
+
+export async function getPlayerOverallStats(
+  linkId: string,
+  season: string = '2026'
+): Promise<PlayerOverallStatsResponse | null> {
+  const url = `${BASE_URL}/mod_playercardallstats/helper/getplayerallstats5.php?lkq=${linkId}&age=0&season=${season}`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        origin: 'https://www.leijonat.fi',
+        referer: `https://www.leijonat.fi/pelaajat?lkq=${linkId}`,
+      },
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch player overall stats: ${res.status} ${res.statusText}`);
+    }
+
     return await res.json();
   } catch (error) {
     console.error(error);

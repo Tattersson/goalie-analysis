@@ -53,8 +53,47 @@ export interface GoalieGame {
 
 // Keeping it simple by focusing on the "AllGoalieGames" array which flattens the stats
 export interface GameStatsResponse {
-  GoalieLevels: any[]; // You can type this out deeper if you need level-specific aggregates
+  GoalieLevels: unknown[]; // You can type this out deeper if you need level-specific aggregates
   AllGoalieGames: GoalieGame[];
-  SkaterLevels: any[];
-  AllSkaterGames: any[];
+  SkaterLevels: unknown[];
+  AllSkaterGames: unknown[];
+}
+
+export interface SeasonTeamsEntry {
+  LevelName: string;
+  Teams: {
+    TeamName: string[];
+    TeamID: string[];
+  };
+}
+
+export interface PlayerOverallStatsResponse {
+  IsGoalieStats: string;
+  IsSkaterStats: string;
+  GoalieGames: string;
+  GoaliePlayedGames: string;
+  GoalieGoalsAgainst: string;
+  GoalieToi: string;
+  GoalieGaa: string;
+  GoalieWins: string;
+  GoalieLosses: string;
+  GoalieZeroGames: string;
+  GoaliePoints: string;
+  GoaliePenaltyMinutes: string;
+  SkaterGames: string;
+  SkaterGoals: string;
+  SkaterGoalsPP: string;
+  SkaterGoalsSH: string;
+  SkaterGoalsWS: string;
+  SkaterAssists: string;
+  SkaterPoints: string;
+  SeasonTeams: SeasonTeamsEntry[];
+  SkaterPenaltyMinutes: string;
+  SkaterToi: string;
+  SkaterShifts: string;
+  SkaterToiAvg: string;
+  SkaterShiftsAvg: string;
+  GameLength: string;
+  HasTimeOnIce: string;
+  HasWinningShot: string;
 }

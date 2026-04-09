@@ -1,19 +1,84 @@
-import { searchPlayer, getGoalieGameStats } from '@/lib/api';
+import Link from 'next/link';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { searchPlayer, getGoalieGameStats, getPlayerOverallStats } from '@/lib/api';
+import PrintAnalysisButton from './PrintAnalysisButton';
+import {
+  buildGoalieTrendSnapshot,
+  generateGoalieSeasonAnalysis,
+  generateGoalieSeasonAnalysisFallback,
+} from '@/lib/gemini';
 
 // This is a Server Component, meaning this code runs on the Next.js server, avoiding CORS.
 export default async function GoalieDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; pid?: string }>;
+  searchParams: Promise<{ q?: string; pid?: string; analyze?: string }>;
 }) {
-  const { q, pid } = await searchParams;
+  const { q, pid, analyze } = await searchParams;
   const query = q?.trim() ?? '';
+  const selectedPid = pid?.trim() ?? '';
+  const shouldAnalyze = analyze === '1';
 
   const playerSearch = query ? await searchPlayer(query) : null;
   const players = playerSearch?.players ?? [];
-  const selectedPlayer = players.find((p) => String(p.LinkID) === pid) ?? null;
+  const selectedPlayer = players.find((p) => String(p.LinkID) === selectedPid) ?? null;
 
-  const gameStats = pid ? await getGoalieGameStats(pid, '2026') : null;
+  const [overallStats, gameStats] = selectedPid
+    ? await Promise.all([
+        getPlayerOverallStats(selectedPid, '2026'),
+        getGoalieGameStats(selectedPid, '2026'),
+      ])
+    : [null, null];
+
+  const seasonTotals = (gameStats?.AllGoalieGames ?? []).reduce(
+    (totals, game) => {
+      const saves = Number(game.GoalieSaves);
+      const goalsAgainst = Number(game.GoalieGoalsAgainst);
+
+      return {
+        saves: totals.saves + (Number.isFinite(saves) ? saves : 0),
+        goalsAgainst: totals.goalsAgainst + (Number.isFinite(goalsAgainst) ? goalsAgainst : 0),
+      };
+    },
+    { saves: 0, goalsAgainst: 0 }
+  );
+
+  const totalShotsAgainst = seasonTotals.saves + seasonTotals.goalsAgainst;
+  const totalSavePct =
+    totalShotsAgainst > 0 ? (seasonTotals.saves / totalShotsAgainst) * 100 : null;
+
+  const trendSnapshot = gameStats?.AllGoalieGames
+    ? buildGoalieTrendSnapshot(gameStats.AllGoalieGames)
+    : null;
+
+  const analysis = shouldAnalyze && trendSnapshot
+    ? await generateGoalieSeasonAnalysis({
+        playerName: selectedPlayer
+          ? `${selectedPlayer.FirstName} ${selectedPlayer.LastName}`
+          : `Player ${selectedPid}`,
+        association: selectedPlayer?.Association ?? '',
+        season: '2026',
+        trend: trendSnapshot,
+        overallStats,
+      })
+    : null;
+
+  const fallbackAnalysis = shouldAnalyze && trendSnapshot
+    ? generateGoalieSeasonAnalysisFallback({
+        playerName: selectedPlayer
+          ? `${selectedPlayer.FirstName} ${selectedPlayer.LastName}`
+          : `Player ${selectedPid}`,
+        association: selectedPlayer?.Association ?? '',
+        season: '2026',
+        trend: trendSnapshot,
+      })
+    : null;
+
+  const analysisText = analysis ?? fallbackAnalysis;
+  const analysisSource = analysis ? 'Gemini' : fallbackAnalysis ? 'Local Fallback' : null;
+
+  const isGeminiConfigured = Boolean(process.env.GEMINI_API_KEY);
 
   return (
     <main className="p-8 font-sans max-w-5xl mx-auto">
@@ -41,11 +106,17 @@ export default async function GoalieDashboard({
           </p>
           <ul className="divide-y divide-gray-200 border rounded-lg overflow-hidden">
             {players.map((player) => {
-              const isSelected = player.LinkID === pid;
+              const isSelected = String(player.LinkID) === selectedPid;
               return (
                 <li key={player.LinkID}>
-                  <a
-                    href={`?q=${encodeURIComponent(query)}&pid=${encodeURIComponent(player.LinkID)}`}
+                  <Link
+                    href={{
+                      query: {
+                        q: query,
+                        pid: String(player.LinkID),
+                        ...(shouldAnalyze ? { analyze: '1' } : {}),
+                      },
+                    }}
                     className={`flex items-center justify-between p-4 text-black hover:bg-blue-50 transition-colors ${
                       isSelected ? 'bg-blue-100' : ''
                     }`}
@@ -57,7 +128,7 @@ export default async function GoalieDashboard({
                       <span className="text-sm text-gray-400">{player.Position}</span>
                     </div>
                     <span className="text-sm text-gray-600">{player.Association || '—'}</span>
-                  </a>
+                  </Link>
                 </li>
               );
             })}
@@ -70,14 +141,168 @@ export default async function GoalieDashboard({
       )}
 
       {/* Stats for selected player */}
-      {selectedPlayer && (
+      {selectedPid && (
         <>
           <h3 className="text-2xl font-bold mb-4">
-            {selectedPlayer.FirstName} {selectedPlayer.LastName}
+            {selectedPlayer
+              ? `${selectedPlayer.FirstName} ${selectedPlayer.LastName}`
+              : `Selected player (${selectedPid})`}
             <span className="text-base font-normal text-gray-500 ml-3">
-              {selectedPlayer.Association} — 2025–2026 Game Log
+              {selectedPlayer?.Association ? `${selectedPlayer.Association} — ` : ''}
+              2025–2026 Game Log
             </span>
           </h3>
+
+          {overallStats?.IsGoalieStats === '1' && (
+            <section className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <h4 className="mb-3 text-lg font-semibold text-black">Overall Goalie Statistics</h4>
+              <div className="grid grid-cols-2 gap-3 text-sm text-black sm:grid-cols-3 lg:grid-cols-5">
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">Games</p>
+                  <p className="text-lg font-bold">{overallStats.GoalieGames || '0'}</p>
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">Played</p>
+                  <p className="text-lg font-bold">{overallStats.GoaliePlayedGames || '0'}</p>
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">Goals Against</p>
+                  <p className="text-lg font-bold">{overallStats.GoalieGoalsAgainst || '0'}</p>
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">GAA</p>
+                  <p className="text-lg font-bold">
+                    {Number(overallStats.GoalieGaa || 0).toFixed(2)}
+                  </p>
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">Total SV%</p>
+                  <p className="text-lg font-bold">
+                    {totalSavePct !== null ? `${totalSavePct.toFixed(2)}%` : '—'}
+                  </p>
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">TOI</p>
+                  <p className="text-lg font-bold">{overallStats.GoalieToi || '0:00'}</p>
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">Wins</p>
+                  <p className="text-lg font-bold">{overallStats.GoalieWins || '0'}</p>
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">Losses</p>
+                  <p className="text-lg font-bold">{overallStats.GoalieLosses || '0'}</p>
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">Shutouts</p>
+                  <p className="text-lg font-bold">{overallStats.GoalieZeroGames || '0'}</p>
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">Points</p>
+                  <p className="text-lg font-bold">{overallStats.GoaliePoints || '0'}</p>
+                </div>
+                <div className="rounded border border-gray-200 bg-white p-3">
+                  <p className="text-gray-500">PIM</p>
+                  <p className="text-lg font-bold">{overallStats.GoaliePenaltyMinutes || '0'}</p>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {trendSnapshot && (
+            <section className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h4 className="text-lg font-semibold text-black">AI Season Trend Analysis</h4>
+                <div className="flex items-center gap-2">
+                  {analysisSource && (
+                    <span className="rounded-full border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-700">
+                      {analysisSource}
+                    </span>
+                  )}
+                  {analysisText && (
+                    <PrintAnalysisButton
+                      playerName={selectedPlayer
+                        ? `${selectedPlayer.FirstName} ${selectedPlayer.LastName}`
+                        : `Player ${selectedPid}`}
+                      season="2026"
+                      source={analysisSource ?? 'Unknown'}
+                      analysisText={analysisText}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="mb-4 grid grid-cols-1 gap-3 text-sm text-black md:grid-cols-2">
+                <div className="rounded border border-emerald-200 bg-white p-3">
+                  <p className="font-medium text-gray-700">Goals Against Trend</p>
+                  <p className="mt-1">
+                    Start avg ({trendSnapshot.sampleWindow} games):{' '}
+                    <strong>{trendSnapshot.startAvgGa.toFixed(2)}</strong>
+                  </p>
+                  <p>
+                    End avg ({trendSnapshot.sampleWindow} games):{' '}
+                    <strong>{trendSnapshot.endAvgGa.toFixed(2)}</strong>
+                  </p>
+                  <p>
+                    Change: <strong>{trendSnapshot.gaDelta.toFixed(2)}</strong> ({trendSnapshot.gaDirection})
+                  </p>
+                </div>
+
+                <div className="rounded border border-emerald-200 bg-white p-3">
+                  <p className="font-medium text-gray-700">Save Percentage Trend</p>
+                  <p className="mt-1">
+                    Start avg ({trendSnapshot.sampleWindow} games):{' '}
+                    <strong>{trendSnapshot.startAvgSvPct.toFixed(2)}%</strong>
+                  </p>
+                  <p>
+                    End avg ({trendSnapshot.sampleWindow} games):{' '}
+                    <strong>{trendSnapshot.endAvgSvPct.toFixed(2)}%</strong>
+                  </p>
+                  <p>
+                    Change: <strong>{trendSnapshot.svPctDelta.toFixed(2)} pp</strong> ({trendSnapshot.svDirection})
+                  </p>
+                </div>
+              </div>
+
+              {!shouldAnalyze ? (
+                <form method="GET" className="mt-2">
+                  <input type="hidden" name="q" value={query} />
+                  <input type="hidden" name="pid" value={selectedPid} />
+                  <input type="hidden" name="analyze" value="1" />
+                  <button
+                    type="submit"
+                    className="rounded-md border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                  >
+                    Analyze This Player
+                  </button>
+                </form>
+              ) : analysisText ? (
+                <div className="rounded border border-emerald-200 bg-white p-4 text-sm leading-6 text-black">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      h1: ({ children }) => <h5 className="mb-2 mt-3 text-base font-semibold">{children}</h5>,
+                      h2: ({ children }) => <h5 className="mb-2 mt-3 text-base font-semibold">{children}</h5>,
+                      h3: ({ children }) => <h6 className="mb-2 mt-3 text-sm font-semibold">{children}</h6>,
+                      p: ({ children }) => <p className="mb-2">{children}</p>,
+                      ul: ({ children }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
+                      ol: ({ children }) => <ol className="mb-2 list-decimal pl-5">{children}</ol>,
+                      li: ({ children }) => <li className="mb-1">{children}</li>,
+                      strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                    }}
+                  >
+                    {analysisText}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-600">
+                  {isGeminiConfigured
+                    ? 'Gemini analysis is currently unavailable for this player.'
+                    : 'Set GEMINI_API_KEY in your environment to enable Gemini-powered player analysis.'}
+                </p>
+              )}
+            </section>
+          )}
 
           {gameStats?.AllGoalieGames && gameStats.AllGoalieGames.length > 0 ? (
             <div className="overflow-x-auto">
@@ -113,6 +338,7 @@ export default async function GoalieDashboard({
           ) : (
             <p className="text-gray-500">No goalie stats found for this player.</p>
           )}
+
         </>
       )}
     </main>

@@ -16,6 +16,22 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Gemini AI Analysis Setup
+
+The player trend analysis panel uses Google Gemini on the server side.
+
+Create a local environment file named `.env.local` in the project root.
+
+Add these variables:
+
+```bash
+GEMINI_API_KEY=your_google_ai_api_key
+# Optional, defaults to gemini-2.0-flash
+GEMINI_MODEL=gemini-2.0-flash
+```
+
+The key is read only on the server and is not exposed to the browser.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
