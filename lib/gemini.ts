@@ -201,6 +201,7 @@ export async function generateGoalieSeasonAnalysis({
     'Bullet list with exactly 2 practical on-ice focuses.',
     '## Off-Ice Practices',
     'Bullet list with 2 to 3 off-ice practices based on the trends.',
+    'Do not take into account any stats that have SV% or GAA of 0, as those are likely from games where the goals, shots, or time on ice were not recorded properly.',
     'Data follows as JSON:',
     JSON.stringify(
       {

@@ -13,16 +13,22 @@ import {
 export default async function GoalieDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; pid?: string; analyze?: string }>;
+  searchParams: Promise<{ q?: string; pid?: string; pname?: string; association?: string; analyze?: string }>;
 }) {
-  const { q, pid, analyze } = await searchParams;
+  const { q, pid, pname, association, analyze } = await searchParams;
   const query = q?.trim() ?? '';
   const selectedPid = pid?.trim() ?? '';
+  const selectedPlayerNameFromParams = pname?.trim() ?? '';
+  const selectedAssociationFromParams = association?.trim() ?? '';
   const shouldAnalyze = analyze === '1';
 
   const playerSearch = query ? await searchPlayer(query) : null;
   const players = playerSearch?.players ?? [];
   const selectedPlayer = players.find((p) => String(p.LinkID) === selectedPid) ?? null;
+  const selectedPlayerName = selectedPlayer
+    ? `${selectedPlayer.FirstName} ${selectedPlayer.LastName}`
+    : selectedPlayerNameFromParams || 'Selected player';
+  const selectedAssociation = selectedPlayer?.Association ?? selectedAssociationFromParams;
 
   const [overallStats, gameStats] = selectedPid
     ? await Promise.all([
@@ -48,6 +54,22 @@ export default async function GoalieDashboard({
   const totalSavePct =
     totalShotsAgainst > 0 ? (seasonTotals.saves / totalShotsAgainst) * 100 : null;
 
+  const calculatedShutouts = (gameStats?.AllGoalieGames ?? []).reduce((count, game) => {
+    const goalsAgainst = Number(game.GoalieGoalsAgainst);
+    const savePct = Number(game.GoalieSavePerc);
+
+    if (Number.isFinite(goalsAgainst) && Number.isFinite(savePct) && goalsAgainst === 0 && savePct === 100) {
+      return count + 1;
+    }
+
+    return count;
+  }, 0);
+
+  const shutoutsValue =
+    gameStats?.AllGoalieGames && gameStats.AllGoalieGames.length > 0
+      ? String(calculatedShutouts)
+      : (overallStats?.GoalieZeroGames ?? '0');
+
   const trendSnapshot = gameStats?.AllGoalieGames
     ? buildGoalieTrendSnapshot(gameStats.AllGoalieGames)
     : null;
@@ -56,8 +78,8 @@ export default async function GoalieDashboard({
     ? await generateGoalieSeasonAnalysis({
         playerName: selectedPlayer
           ? `${selectedPlayer.FirstName} ${selectedPlayer.LastName}`
-          : `Player ${selectedPid}`,
-        association: selectedPlayer?.Association ?? '',
+          : selectedPlayerName,
+        association: selectedAssociation,
         season: '2026',
         trend: trendSnapshot,
         overallStats,
@@ -68,8 +90,8 @@ export default async function GoalieDashboard({
     ? generateGoalieSeasonAnalysisFallback({
         playerName: selectedPlayer
           ? `${selectedPlayer.FirstName} ${selectedPlayer.LastName}`
-          : `Player ${selectedPid}`,
-        association: selectedPlayer?.Association ?? '',
+          : selectedPlayerName,
+        association: selectedAssociation,
         season: '2026',
         trend: trendSnapshot,
       })
@@ -114,6 +136,8 @@ export default async function GoalieDashboard({
                       query: {
                         q: query,
                         pid: String(player.LinkID),
+                        pname: `${player.FirstName} ${player.LastName}`,
+                        association: player.Association,
                         ...(shouldAnalyze ? { analyze: '1' } : {}),
                       },
                     }}
@@ -144,11 +168,9 @@ export default async function GoalieDashboard({
       {selectedPid && (
         <>
           <h3 className="text-2xl font-bold mb-4">
-            {selectedPlayer
-              ? `${selectedPlayer.FirstName} ${selectedPlayer.LastName}`
-              : `Selected player (${selectedPid})`}
+            {selectedPlayerName}
             <span className="text-base font-normal text-gray-500 ml-3">
-              {selectedPlayer?.Association ? `${selectedPlayer.Association} — ` : ''}
+              {selectedAssociation ? `${selectedAssociation} — ` : ''}
               2025–2026 Game Log
             </span>
           </h3>
@@ -182,27 +204,19 @@ export default async function GoalieDashboard({
                   </p>
                 </div>
                 <div className="rounded border border-gray-200 bg-white p-3">
-                  <p className="text-gray-500">TOI</p>
+                  <p className="text-gray-500">Time On Ice (TOI)</p>
                   <p className="text-lg font-bold">{overallStats.GoalieToi || '0:00'}</p>
                 </div>
                 <div className="rounded border border-gray-200 bg-white p-3">
-                  <p className="text-gray-500">Wins</p>
-                  <p className="text-lg font-bold">{overallStats.GoalieWins || '0'}</p>
-                </div>
-                <div className="rounded border border-gray-200 bg-white p-3">
-                  <p className="text-gray-500">Losses</p>
-                  <p className="text-lg font-bold">{overallStats.GoalieLosses || '0'}</p>
-                </div>
-                <div className="rounded border border-gray-200 bg-white p-3">
                   <p className="text-gray-500">Shutouts</p>
-                  <p className="text-lg font-bold">{overallStats.GoalieZeroGames || '0'}</p>
+                  <p className="text-lg font-bold">{shutoutsValue}</p>
                 </div>
                 <div className="rounded border border-gray-200 bg-white p-3">
                   <p className="text-gray-500">Points</p>
                   <p className="text-lg font-bold">{overallStats.GoaliePoints || '0'}</p>
                 </div>
                 <div className="rounded border border-gray-200 bg-white p-3">
-                  <p className="text-gray-500">PIM</p>
+                  <p className="text-gray-500">Penalties (min)</p>
                   <p className="text-lg font-bold">{overallStats.GoaliePenaltyMinutes || '0'}</p>
                 </div>
               </div>
@@ -223,7 +237,7 @@ export default async function GoalieDashboard({
                     <PrintAnalysisButton
                       playerName={selectedPlayer
                         ? `${selectedPlayer.FirstName} ${selectedPlayer.LastName}`
-                        : `Player ${selectedPid}`}
+                        : selectedPlayerName}
                       season="2026"
                       source={analysisSource ?? 'Unknown'}
                       analysisText={analysisText}
@@ -268,6 +282,8 @@ export default async function GoalieDashboard({
                 <form method="GET" className="mt-2">
                   <input type="hidden" name="q" value={query} />
                   <input type="hidden" name="pid" value={selectedPid} />
+                  <input type="hidden" name="pname" value={selectedPlayerName} />
+                  <input type="hidden" name="association" value={selectedAssociation} />
                   <input type="hidden" name="analyze" value="1" />
                   <button
                     type="submit"
